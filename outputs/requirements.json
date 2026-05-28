@@ -1,0 +1,93 @@
+[
+  {
+    "index": "1",
+    "name": "尺寸要求（长×宽×高）",
+    "unit": "mm",
+    "required_value": "可按项目调整，1600×750×750",
+    "response_value": ""
+  },
+  {
+    "index": "2",
+    "name": "主体材质",
+    "unit": "-",
+    "required_value": "钢制框架 + 实木颗粒板面板（Q235 冷轧钢板厚度≥1.2mm；实木颗粒板密度≥700kg/m³），是否防火",
+    "response_value": ""
+  },
+  {
+    "index": "3",
+    "name": "主体颜色",
+    "unit": "-",
+    "required_value": "灰白色或按招标人指定等",
+    "response_value": ""
+  },
+  {
+    "index": "4",
+    "name": "产品功能定位",
+    "unit": "-",
+    "required_value": "办公室工位，普通型、教学型等",
+    "response_value": ""
+  },
+  {
+    "index": "5",
+    "name": "配送及安装要求",
+    "unit": "-",
+    "required_value": "配送至指定地点，包安装，不额外收费",
+    "response_value": ""
+  },
+  {
+    "index": "6",
+    "name": "承重能力",
+    "unit": "kg",
+    "required_value": "≥150",
+    "response_value": ""
+  },
+  {
+    "index": "7",
+    "name": "屏风主体",
+    "unit": "面",
+    "required_value": "玻璃等",
+    "response_value": ""
+  },
+  {
+    "index": "8",
+    "name": "五金件",
+    "unit": "套",
+    "required_value": "304 不锈钢材质（含连接件、铰链、导轨等），防锈耐腐蚀；导轨无声阻尼设计，滑动顺畅，使用寿命≥5 万次",
+    "response_value": ""
+  },
+  {
+    "index": "9",
+    "name": "安装方式",
+    "unit": "-",
+    "required_value": "两面独立工作位",
+    "response_value": ""
+  },
+  {
+    "index": "10",
+    "name": "外表面质量",
+    "unit": "-",
+    "required_value": "表面光滑、洁净，无裂纹、结疤、折叠、划伤等缺陷",
+    "response_value": ""
+  },
+  {
+    "index": "11",
+    "name": "内表面质量",
+    "unit": "-",
+    "required_value": "内壁光滑，无氧化皮、锈蚀、杂质等",
+    "response_value": ""
+  },
+  {
+    "index": "12",
+    "name": "连接结构",
+    "unit": "-",
+    "required_value": "专用连接件连接，无需现场焊接",
+    "response_value": ""
+  },
+  {
+    "index": "13",
+    "name": "环保要求",
+    "unit": "-",
+    "required_value": "例：甲醛释放量≤0.050mg/m³，异味等级≤1 级，符合国家标准",
+    "response_value": ""
+  }
+]
