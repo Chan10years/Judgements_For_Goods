@@ -1,0 +1,13 @@
+{
+  "user_agent": "JudgementsForGoodsCrawler/1.0 (+public-url-audit; procurement-assist-only)",
+  "timeout_seconds": 10,
+  "max_retries": 2,
+  "retry_backoff_seconds": 1,
+  "request_interval_seconds": 2,
+  "respect_robots_txt": true,
+  "max_urls_per_run": 20,
+  "output_raw_path": "outputs/crawler_raw.json",
+  "output_products_path": "outputs/crawler_products.json",
+  "output_report_path": "outputs/crawler_report.json",
+  "log_path": "logs/crawler_run.log"
+}
