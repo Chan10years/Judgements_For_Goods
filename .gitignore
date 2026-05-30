@@ -1,5 +1,7 @@
 # Python cache files
 __pycache__/
+**/__pycache__/
+*.pyc
 *.py[cod]
 *.pyo
 *$py.class
@@ -12,6 +14,7 @@ __pycache__/
 htmlcov/
 
 # Virtual environments
+.env
 .venv/
 venv/
 env/
@@ -23,5 +26,8 @@ logs/*
 *.log
 
 # Runtime output artifacts
+outputs/*.json
+outputs/*.docx
+outputs/stage8_test_workspace/
 outputs/*
 !outputs/.gitkeep

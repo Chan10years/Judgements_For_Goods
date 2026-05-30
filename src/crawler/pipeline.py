@@ -11,6 +11,7 @@ from src.crawler.logging_utils import setup_crawler_logger, write_json
 from src.crawler.models import CrawlerConfig, resolve_project_path
 from src.crawler.normalizer import normalize_crawler_products
 from src.crawler.parser import parse_product_page
+from src.crawler.review import generate_manual_review_items
 from src.crawler.robots_checker import RobotsChecker
 from src.crawler.seed_loader import load_seed_urls
 
@@ -32,7 +33,9 @@ def load_crawler_config(config_path: str | Path) -> CrawlerConfig:
     return CrawlerConfig.from_dict(data)
 
 
-def _make_report(config: CrawlerConfig, total_url_count: int) -> dict[str, Any]:
+def _make_report(config: CrawlerConfig, total_url_count: int, manual_review_path: Path) -> dict[str, Any]:
+    output_paths = config.output_paths()
+    output_paths["manual_review"] = str(manual_review_path)
     return {
         "started_at": _utc_now(),
         "finished_at": "",
@@ -55,8 +58,47 @@ def _make_report(config: CrawlerConfig, total_url_count: int) -> dict[str, Any]:
         "parse_failures": [],
         "field_missing_items": [],
         "dedupe": {},
-        "output_paths": config.output_paths(),
+        "output_paths": output_paths,
+        "summary": {},
         "notice": "采集结果和推荐结果仅作为采购辅助候选，需人工复核，不是最终采购结论。",
+    }
+
+
+def _main_failure_reasons(report: dict[str, Any]) -> list[str]:
+    reasons: list[str] = []
+    if report.get("invalid_seed_entries"):
+        reasons.append(f"无效 URL 条目 {len(report.get('invalid_seed_entries', []))} 条")
+    if report.get("robots_restricted_count"):
+        reasons.append(f"robots 限制跳过 {report.get('robots_restricted_count')} 条")
+    if report.get("http_error_count"):
+        reasons.append(f"HTTP 错误 {report.get('http_error_count')} 条")
+    if report.get("parse_failure_count"):
+        reasons.append(f"页面解析失败 {report.get('parse_failure_count')} 条")
+    if report.get("missing_field_count"):
+        reasons.append(f"字段缺失 {report.get('missing_field_count')} 项")
+
+    other_failures = [
+        str(item.get("error_type") or item.get("error_message") or "未知失败")
+        for item in report.get("failures", [])
+        if isinstance(item, dict) and (item.get("error_type") or item.get("error_message"))
+    ]
+    for reason in other_failures:
+        if reason and reason not in reasons:
+            reasons.append(reason)
+
+    return reasons or ["无明显失败原因"]
+
+
+def _update_summary(report: dict[str, Any]) -> None:
+    report["summary"] = {
+        "本次采集 URL 数": report.get("total_url_count", 0),
+        "成功商品数": report.get("success_count", 0),
+        "失败 URL 数": report.get("failure_count", 0),
+        "跳过 URL 数": report.get("skipped_count", 0),
+        "需人工复核商品数": len(report.get("manual_review_items", [])),
+        "主要失败原因": _main_failure_reasons(report),
+        "输出文件路径": {key: str(value) for key, value in report.get("output_paths", {}).items()},
+        "免责声明": "结果为采购辅助候选，非最终采购结论；所有无法确认的信息需人工复核。",
     }
 
 
@@ -66,6 +108,7 @@ def run_crawler(
 ) -> dict[str, Any]:
     config = load_crawler_config(config_path)
     resolved_output_paths = {name: resolve_project_path(path) for name, path in config.output_paths().items()}
+    manual_review_path = resolved_output_paths["report"].parent / "manual_review_items.json"
     logger = setup_crawler_logger(resolved_output_paths["log"])
     logger.info("crawler started")
 
@@ -79,7 +122,7 @@ def run_crawler(
         if isinstance(seed_data, list):
             seed_count = len(seed_data)
 
-    report = _make_report(config, total_url_count=seed_count)
+    report = _make_report(config, total_url_count=seed_count, manual_review_path=manual_review_path)
     raw_records: list[dict[str, Any]] = []
     parsed_products: list[dict[str, Any]] = []
 
@@ -170,7 +213,10 @@ def run_crawler(
         report["dedupe"] = dedupe_report
         report["dedupe_before_count"] = dedupe_report["before_count"]
         report["dedupe_after_count"] = dedupe_report["after_count"]
+        review_items = generate_manual_review_items(deduped_products, manual_review_path)
+        report["manual_review_items"] = review_items
         report["finished_at"] = _utc_now()
+        _update_summary(report)
 
         write_json(resolved_output_paths["raw"], raw_records)
         write_json(resolved_output_paths["products"], deduped_products)
@@ -182,7 +228,10 @@ def run_crawler(
         report["finished_at"] = _utc_now()
         report["failure_count"] += 1
         report["failures"].append({"url": "", "error_type": "crawler_exception", "error_message": str(exc)})
+        report["manual_review_items"] = []
+        _update_summary(report)
         write_json(resolved_output_paths["raw"], raw_records)
         write_json(resolved_output_paths["products"], [])
+        write_json(manual_review_path, [])
         write_json(resolved_output_paths["report"], report)
         raise

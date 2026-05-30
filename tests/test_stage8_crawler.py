@@ -285,14 +285,21 @@ class Stage8CrawlerTests(unittest.TestCase):
             report = run_crawler(config_path=config_path, seed_path=seed_path)
 
         products = json.loads(products_path.read_text(encoding="utf-8"))
+        review_path = temp_root / "manual_review_items.json"
 
         self.assertEqual(report["total_url_count"], 1)
         self.assertEqual(report["valid_url_count"], 1)
         self.assertEqual(report["success_count"], 1)
         self.assertEqual(report["dedupe_after_count"], 1)
+        self.assertEqual(report["summary"]["本次采集 URL 数"], 1)
+        self.assertEqual(report["summary"]["成功商品数"], 1)
+        self.assertEqual(report["summary"]["跳过 URL 数"], 0)
+        self.assertEqual(report["summary"]["需人工复核商品数"], 0)
+        self.assertIn("免责声明", report["summary"])
         self.assertTrue(raw_path.exists())
         self.assertTrue(report_path.exists())
         self.assertTrue(log_path.exists())
+        self.assertTrue(review_path.exists())
         self.assertEqual(products[0]["source"], "Example")
 
     def test_main_pipeline_falls_back_when_crawler_products_empty(self) -> None:
