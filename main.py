@@ -24,6 +24,18 @@ RANKED_PRODUCTS_JSON = OUTPUT_DIR / "ranked_products.json"
 RESPONSES_JSON = OUTPUT_DIR / "responses.json"
 OUTPUT_DOCX = OUTPUT_DIR / "recommendation_result.docx"
 _REVIEWED_PATH_UNSET = object()
+DATA_SOURCE_PRIORITY = ["reviewed_products.json", "crawler_products.json", "sample_products.json"]
+DELIVERY_OUTPUT_FILE_INDEX = [
+    "outputs/recommendation_result.docx",
+    "outputs/ranked_products.json",
+    "outputs/responses.json",
+    "outputs/crawler_products.json",
+    "outputs/manual_review_items.json",
+    "outputs/manual_review_filled_template.json",
+    "outputs/manual_review_validation_report.json",
+    "outputs/reviewed_products.json",
+    "outputs/review_report.json",
+]
 
 
 def _require_file(path: Path, label: str) -> None:
@@ -68,6 +80,119 @@ def _json_has_products(path: Path, reviewed: bool = False) -> bool:
         return False
     validator = _is_usable_reviewed_product if reviewed else _is_usable_crawler_product
     return any(validator(item) for item in data)
+
+
+def _read_json_if_exists(path: str | Path | None) -> Any:
+    if path is None:
+        return None
+    json_path = Path(path)
+    if not json_path.exists() or json_path.stat().st_size == 0:
+        return None
+    try:
+        return json.loads(json_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+
+
+def _json_item_count(data: Any, key: str = "products") -> int:
+    if isinstance(data, dict):
+        data = data.get(key, [])
+    if isinstance(data, list):
+        return len([item for item in data if isinstance(item, dict)])
+    return 0
+
+
+def _data_source_label(products_json_path: Path) -> str:
+    source_name = products_json_path.name
+    if source_name == DEFAULT_REVIEWED_PRODUCTS_PATH.name:
+        return "reviewed_products.json（已复核 approved 商品）"
+    if source_name == DEFAULT_CRAWLER_PRODUCTS_PATH.name:
+        return "crawler_products.json（公开 URL 采集候选商品）"
+    if source_name == DEFAULT_SAMPLE_PRODUCTS_PATH.name:
+        return "sample_products.json（本地样例商品兜底）"
+    return source_name
+
+
+def _build_review_status_metadata(
+    reviewed_products_path: str | Path | None,
+    review_report_path: str | Path | None,
+) -> dict[str, Any]:
+    reviewed_path = Path(reviewed_products_path) if reviewed_products_path is not None else None
+    report_path = Path(review_report_path) if review_report_path is not None else None
+    reviewed_data = _read_json_if_exists(reviewed_path)
+    report = _read_json_if_exists(report_path)
+
+    if not isinstance(report, dict):
+        report = {}
+
+    reviewed_products_count = _json_item_count(reviewed_data)
+    if not reviewed_products_count:
+        reviewed_products_count = int(report.get("reviewed_products_count") or 0)
+
+    unmatched_review_items = report.get("unmatched_review_items", [])
+    unmatched_review_items_count = len(unmatched_review_items) if isinstance(unmatched_review_items, list) else 0
+    unresolved_items = report.get("unresolved_items", [])
+    unresolved_items_count = len(unresolved_items) if isinstance(unresolved_items, list) else 0
+
+    has_reviewed_products = reviewed_path is not None and reviewed_path.exists()
+    has_review_report = report_path is not None and report_path.exists()
+    if not has_reviewed_products and not has_review_report:
+        risk_note = "未发现人工复核结果文件，所有候选商品和关键字段仍需人工复核。"
+    elif unmatched_review_items_count or unresolved_items_count or int(report.get("needs_more_info_count") or 0):
+        risk_note = "已存在人工复核信息，但仍有未匹配或待补充项，需要继续人工复核。"
+    else:
+        risk_note = "已读取人工复核文件；采购前仍需人工确认候选商品、价格、规格、来源和证据。"
+
+    return {
+        "has_reviewed_products": has_reviewed_products,
+        "has_review_report": has_review_report,
+        "reviewed_products_count": reviewed_products_count,
+        "approved_count": int(report.get("approved_count") or 0),
+        "rejected_count": int(report.get("rejected_count") or 0),
+        "needs_more_info_count": int(report.get("needs_more_info_count") or 0),
+        "unmatched_review_items_count": unmatched_review_items_count,
+        "risk_note": risk_note,
+    }
+
+
+def _build_delivery_metadata(
+    products_json: Path,
+    output_root: Path,
+    requirements_count: int,
+    products_count: int,
+    ranked_products_count: int,
+    top_products_count: int,
+    requirements_path: Path,
+    ranked_products_path: Path,
+    responses_path: Path,
+    output_docx: Path,
+    reviewed_products_path: str | Path | None,
+    review_report_path: str | Path | None,
+) -> dict[str, Any]:
+    return {
+        "data_source_priority": DATA_SOURCE_PRIORITY,
+        "actual_data_source": _data_source_label(products_json),
+        "products_source_path": str(products_json),
+        "data_source_note": "系统按 reviewed_products.json、crawler_products.json、sample_products.json 的优先级选择可用商品数据；空文件或无可用商品时继续后退。",
+        "requirements_count": requirements_count,
+        "products_count": products_count,
+        "ranked_products_count": ranked_products_count,
+        "top_products_count": top_products_count,
+        "output_paths": {
+            "requirements_json": str(requirements_path),
+            "ranked_products_json": str(ranked_products_path),
+            "responses_json": str(responses_path),
+            "recommendation_result_docx": str(output_docx),
+            "crawler_products_json": str(output_root / DEFAULT_CRAWLER_PRODUCTS_PATH.name),
+            "manual_review_items_json": str(output_root / DEFAULT_MANUAL_REVIEW_PATH.name),
+            "manual_review_filled_template_json": str(output_root / "manual_review_filled_template.json"),
+            "manual_review_validation_report_json": str(output_root / "manual_review_validation_report.json"),
+            "reviewed_products_json": str(output_root / DEFAULT_REVIEWED_PRODUCTS_PATH.name),
+            "review_report_json": str(output_root / DEFAULT_REVIEW_REPORT_PATH.name),
+        },
+        "output_file_index": DELIVERY_OUTPUT_FILE_INDEX,
+        "review_status": _build_review_status_metadata(reviewed_products_path, review_report_path),
+    }
 
 
 def _select_products_json_path(
@@ -132,7 +257,21 @@ def run_pipeline(
     if not top_products:
         raise ValueError("没有可用 Top 3 候选商品，已停止 Word 写回。")
 
-    write_responses(input_docx, responses, output_docx, summary_products=top_products)
+    delivery_metadata = _build_delivery_metadata(
+        products_json=products_json,
+        output_root=output_root,
+        requirements_count=len(requirements),
+        products_count=len(products),
+        ranked_products_count=len(ranked_products),
+        top_products_count=len(top_products),
+        requirements_path=requirements_path,
+        ranked_products_path=ranked_products_path,
+        responses_path=responses_path,
+        output_docx=output_docx,
+        reviewed_products_path=reviewed_products_path,
+        review_report_path=review_report_path,
+    )
+    write_responses(input_docx, responses, output_docx, summary_products=top_products, delivery_metadata=delivery_metadata)
 
     result = {
         "requirements_count": len(requirements),
