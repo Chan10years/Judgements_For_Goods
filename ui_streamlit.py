@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
+import re
 from typing import Any, Callable
 
-from main import run_pipeline
+from main import (
+    build_marketplace_search_links,
+    run_pipeline,
+    run_stage14_v2a_delivery,
+    run_stage15_smart_sourcing_delivery,
+)
 from src.crawler.pipeline import run_crawler
 from src.crawler.review_apply import apply_manual_reviews, write_empty_review_outputs
 from src.crawler.review_template import generate_review_template
@@ -53,6 +60,9 @@ FILE_STATUS_KEYS = [
 ]
 
 SESSION_RESULT_KEY = "stage12_last_operation_result"
+STAGE13_2B_SESSION_RESULT_KEY = "stage13_2b_last_operation_result"
+STAGE15_SESSION_RESULT_KEY = "stage15_last_operation_result"
+STAGE13_2B_UPLOAD_DIR = BASE_DIR / "outputs" / "stage13_2b_uploads"
 
 
 @dataclass
@@ -101,6 +111,21 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, tuple):
         return [_json_safe(item) for item in value]
     return value
+
+
+def _safe_upload_filename(filename: str, fallback: str) -> str:
+    name = Path(filename or fallback).name
+    name = re.sub(r"[^0-9A-Za-z._\-\u4e00-\u9fff]+", "_", name).strip("._")
+    return name or fallback
+
+
+def _save_uploaded_file(uploaded_file: Any, upload_dir: Path = STAGE13_2B_UPLOAD_DIR) -> Path:
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    filename = _safe_upload_filename(getattr(uploaded_file, "name", ""), "uploaded_file")
+    output_path = upload_dir / f"{timestamp}_{filename}"
+    output_path.write_bytes(uploaded_file.getbuffer())
+    return output_path
 
 
 def _select_review_filled_path() -> Path | None:
@@ -157,6 +182,60 @@ def run_main_pipeline_action() -> OperationResult:
         output_paths=_path_list(*paths),
         details=_json_safe(result),
     )
+
+
+def run_stage14_v2a_delivery_action(word_path: str | Path, candidate_path: str | Path) -> OperationResult:
+    output_dir = BASE_DIR / "outputs" / "stage14_v2a_mvp" / datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    result = run_stage14_v2a_delivery(word_path, candidate_path, output_dir=output_dir)
+    summary = (
+        f"需求项 {result.get('requirements_count', 0)} 条，"
+        f"候选商品 {result.get('products_count', 0)} 个，"
+        f"Top候选 {result.get('top_products_count', 0)} 个。"
+    )
+    paths = [
+        result.get("requirements_path"),
+        result.get("ranked_products_path"),
+        result.get("responses_path"),
+        result.get("output_docx_path"),
+        result.get("imported_candidate_products_path"),
+    ]
+    return OperationResult(
+        name="V2-A 浏览器辅助式寻源 MVP",
+        success=True,
+        summary=summary,
+        output_paths=_path_list(*paths),
+        details=_json_safe(result),
+    )
+
+
+def run_stage15_smart_sourcing_action(word_path: str | Path, candidate_path: str | Path) -> OperationResult:
+    output_dir = BASE_DIR / "outputs" / "stage15_v2a_plus" / datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    result = run_stage15_smart_sourcing_delivery(word_path, candidate_path, output_dir=output_dir)
+    summary = (
+        f"需求项 {result.get('requirements_count', 0)} 条，"
+        f"候选商品 {result.get('products_count', 0)} 个，"
+        f"Top候选 {result.get('top_products_count', 0)} 个，"
+        f"评分表 { _relative_path(result.get('scoring_csv_path', '')) if result.get('scoring_csv_path') else '未生成' }。"
+    )
+    paths = [
+        result.get("requirements_path"),
+        result.get("ranked_products_path"),
+        result.get("responses_path"),
+        result.get("output_docx_path"),
+        result.get("imported_candidate_products_path"),
+        result.get("scoring_csv_path"),
+    ]
+    return OperationResult(
+        name="V2-A+ 智能寻源助手",
+        success=True,
+        summary=summary,
+        output_paths=_path_list(*paths),
+        details=_json_safe(result),
+    )
+
+
+def run_stage13_2b_delivery_action(word_path: str | Path, candidate_path: str | Path) -> OperationResult:
+    return run_stage14_v2a_delivery_action(word_path, candidate_path)
 
 
 def generate_review_template_action() -> OperationResult:
@@ -309,6 +388,159 @@ def _render_result(st: Any, result: OperationResult) -> None:
             st.json(result.details)
 
 
+def _render_marketplace_search(st: Any, search: dict[str, Any] | None = None) -> None:
+    search = search or build_marketplace_search_links()
+    st.markdown("**智能搜索词与淘宝/京东寻源辅助**")
+    st.info(
+        search.get(
+            "notice",
+            "当前 V2-A+ 提供智能寻源辅助入口。客户在自己的浏览器中正常登录并人工确认候选商品后，"
+            "通过候选商品文件或候选链接/文本清单导入系统，再进入自动筛选排序和 Word 输出流程。",
+        )
+    )
+    keyword_rows = [
+        {"类型": "精准词", "关键词": "；".join(search.get("precise_terms", []))},
+        {"类型": "放宽词", "关键词": "；".join(search.get("relaxed_terms", []))},
+        {"类型": "替代词", "关键词": "；".join(search.get("alternative_terms", []))},
+        {"类型": "排除词", "关键词": "；".join(search.get("excluded_terms", []))},
+    ]
+    st.dataframe(keyword_rows, hide_index=True, use_container_width=True)
+    col1, col2 = st.columns(2)
+    col1.write(f"淘宝搜索关键词：{search.get('taobao_keyword', '办公屏风 工位')}")
+    col1.markdown(f"[打开淘宝搜索]({search.get('taobao_search_url', 'https://s.taobao.com/search?q=%E5%8A%9E%E5%85%AC%E5%B1%8F%E9%A3%8E%20%E5%B7%A5%E4%BD%8D')})")
+    col2.write(f"京东搜索关键词：{search.get('jd_keyword', '办公屏风 工位')}")
+    col2.markdown(f"[打开京东搜索]({search.get('jd_search_url', 'https://search.jd.com/Search?keyword=%E5%8A%9E%E5%85%AC%E5%B1%8F%E9%A3%8E%20%E5%B7%A5%E4%BD%8D&enc=utf-8')})")
+
+    suggestions = search.get("filter_suggestions", [])
+    if suggestions:
+        st.markdown("**平台筛选建议（采购辅助）**")
+        st.dataframe(suggestions, hide_index=True, use_container_width=True)
+
+
+def _render_stage14_v2a_mvp(st: Any) -> None:
+    st.header("V2-A+ 智能寻源助手")
+    _render_marketplace_search(st)
+
+    if not hasattr(st, "file_uploader"):
+        st.caption("当前运行环境不支持文件上传控件，已跳过 V2-A 上传控件渲染。")
+        return
+
+    word_upload = st.file_uploader("上传采购 Word（docx）", type=["docx"], key="stage13_2b_word_upload")
+    candidate_upload = st.file_uploader(
+        "上传候选商品文件（json/csv）或候选链接/混合文本清单（txt）",
+        type=["json", "csv", "txt"],
+        key="stage13_2b_candidate_upload",
+    )
+
+    if st.button("生成推荐 Word 与 CSV 评分表", use_container_width=True, key="stage13_2b_generate_word"):
+        if word_upload is None or candidate_upload is None:
+            st.warning("请先上传采购 Word 和候选商品 JSON/CSV 或候选链接/混合文本清单 TXT。")
+        else:
+            try:
+                word_path = _save_uploaded_file(word_upload)
+                candidate_path = _save_uploaded_file(candidate_upload)
+                result = run_stage15_smart_sourcing_action(word_path, candidate_path)
+            except Exception as exc:
+                result = OperationResult(
+                    name="V2-A+ 智能寻源助手",
+                    success=False,
+                    summary="操作未完成。",
+                    output_paths=[],
+                    error=str(exc),
+                )
+            st.session_state[STAGE15_SESSION_RESULT_KEY] = asdict(result)
+
+    saved_result = st.session_state.get(STAGE15_SESSION_RESULT_KEY) or st.session_state.get(STAGE13_2B_SESSION_RESULT_KEY)
+    if not saved_result:
+        return
+
+    result = OperationResult(**saved_result)
+    _render_result(st, result)
+    details = result.details or {}
+    metrics = st.columns(4)
+    metrics[0].metric("需求数量", details.get("requirements_count", 0))
+    metrics[1].metric("候选商品数量", details.get("products_count", 0))
+    metrics[2].metric("Top 推荐数量", details.get("top_products_count", 0))
+    metrics[3].metric("输出 Word", _relative_path(details.get("output_docx_path", "")) if details.get("output_docx_path") else "未生成")
+
+    if isinstance(details.get("marketplace_search"), dict):
+        _render_marketplace_search(st, details["marketplace_search"])
+
+    top_products = details.get("top_products")
+    if isinstance(top_products, list) and top_products:
+        rows = []
+        for rank, product in enumerate(top_products, start=1):
+            if not isinstance(product, dict):
+                continue
+            rows.append(
+                {
+                    "排名": rank,
+                    "商品名称": product.get("title", "待人工复核"),
+                    "平台": product.get("platform") or product.get("source") or "待人工复核",
+                    "价格": product.get("price", "待人工复核"),
+                    "尺寸": product.get("dimensions") or "待人工复核",
+                    "材质": product.get("material") or "待人工复核",
+                    "安装服务": product.get("installation_service") or product.get("service_text") or "待人工复核",
+                    "商品链接": product.get("url") or "待人工复核",
+                    "图片链接": product.get("image_url") or "待人工复核",
+                    "匹配分数": product.get("score", 0),
+                    "命中指标": "；".join(product.get("matched_indicators", [])) if isinstance(product.get("matched_indicators"), list) else "",
+                    "待复核字段": "；".join(product.get("missing_fields", [])) if isinstance(product.get("missing_fields"), list) else "",
+                    "风险提示": "；".join(product.get("risk_tips", [])) if isinstance(product.get("risk_tips"), list) else "",
+                    "推荐等级": product.get("recommendation_level", "待人工复核"),
+                }
+            )
+        if rows:
+            st.subheader("Top 推荐商品")
+            st.dataframe(rows, hide_index=True, use_container_width=True)
+            st.subheader("人工确认问题")
+            for rank, product in enumerate(top_products, start=1):
+                if not isinstance(product, dict):
+                    continue
+                title = product.get("title") or f"候选商品 {rank}"
+                with st.expander(f"第 {rank} 款：{title}"):
+                    explanation = product.get("recommendation_explanation")
+                    if isinstance(explanation, dict):
+                        st.markdown("**推荐解释**")
+                        st.json(explanation)
+                    questions = product.get("manual_confirmation_questions")
+                    if isinstance(questions, list) and questions:
+                        st.markdown("**确认问题**")
+                        for question in questions:
+                            st.write(f"- {question}")
+
+    output_docx = Path(details.get("output_docx_path", ""))
+    if result.success and details.get("output_docx_path") and output_docx.exists():
+        st.download_button(
+            "下载推荐 Word",
+            data=output_docx.read_bytes(),
+            file_name=output_docx.name,
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            use_container_width=True,
+        )
+    for label, key in [
+        ("下载候选商品 JSON", "imported_candidate_products_path"),
+        ("下载排序结果 JSON", "ranked_products_path"),
+        ("下载 CSV 评分表", "scoring_csv_path"),
+    ]:
+        output_path_text = details.get(key)
+        output_path = Path(output_path_text or "")
+        if result.success and output_path_text and output_path.exists():
+            mime = "text/csv" if key == "scoring_csv_path" else "application/json"
+            st.download_button(
+                label,
+                data=output_path.read_bytes(),
+                file_name=output_path.name,
+                mime=mime,
+                use_container_width=True,
+                key=f"download_{key}",
+            )
+
+
+def _render_stage13_2b_mvp(st: Any) -> None:
+    _render_stage14_v2a_mvp(st)
+
+
 def render_app(st: Any | None = None) -> None:
     st = st or _load_streamlit()
     st.set_page_config(page_title="采购商品推荐与Word自动填充系统", layout="wide")
@@ -344,6 +576,8 @@ def render_app(st: Any | None = None) -> None:
     saved_result = st.session_state.get(SESSION_RESULT_KEY)
     if saved_result:
         _render_result(st, OperationResult(**saved_result))
+
+    _render_stage13_2b_mvp(st)
 
     st.subheader("关键文件存在状态")
     st.dataframe(_file_status_rows(), hide_index=True, use_container_width=True)

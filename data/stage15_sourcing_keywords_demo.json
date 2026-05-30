@@ -1,0 +1,33 @@
+{
+  "demo_requirements": [
+    {
+      "name": "尺寸要求（长×宽×高）",
+      "required_value": "1600×750×750mm"
+    },
+    {
+      "name": "主体材质",
+      "required_value": "钢制框架 + 实木颗粒板面板"
+    },
+    {
+      "name": "配送及安装要求",
+      "required_value": "配送至指定地点，包安装"
+    }
+  ],
+  "expected_keyword_shape": {
+    "precise_terms": [
+      "办公屏风工位 1600x750x750mm 钢制框架 安装"
+    ],
+    "relaxed_terms": [
+      "办公桌屏风组合 1600"
+    ],
+    "alternative_terms": [
+      "职员工位 屏风隔断 办公桌"
+    ],
+    "excluded_terms": [
+      "家用",
+      "二手",
+      "水壶",
+      "单人小桌"
+    ]
+  }
+}

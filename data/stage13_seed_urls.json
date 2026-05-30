@@ -1,0 +1,20 @@
+[
+  {
+    "url": "https://webscraper.io/test-sites/e-commerce/allinone/computers/laptops",
+    "source_name": "WebScraper公开测试电商页",
+    "category_hint": "公开测试电商页面",
+    "note": "公开测试站点，无登录要求，用于阶段13采集验收；页面内容不代表办公家具真实采购来源。"
+  },
+  {
+    "url": "https://example.com/",
+    "source_name": "Example公开样例页",
+    "category_hint": "公开通用网页",
+    "note": "公开样例页面，用于验证非商品页面可被记录为字段缺失或解析不足。"
+  },
+  {
+    "url": "https://example.com/stage13-missing-product-page",
+    "source_name": "Example公开样例404页",
+    "category_hint": "公开失败样例",
+    "note": "公开样例域名下的不存在路径，用于记录 HTTP 或解析失败。"
+  }
+]

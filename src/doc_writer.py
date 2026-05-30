@@ -16,7 +16,24 @@ DELIVERY_OUTPUT_FILE_INDEX = [
     "outputs/manual_review_validation_report.json",
     "outputs/reviewed_products.json",
     "outputs/review_report.json",
+    "outputs/sourcing_score_table.csv",
 ]
+MISSING_FIELD_LABELS = {
+    "title": "商品名称",
+    "platform": "平台",
+    "price": "价格",
+    "url": "商品链接",
+    "shop": "店铺",
+    "source": "来源",
+    "dimensions": "尺寸",
+    "material": "材质",
+    "color": "颜色",
+    "installation_service": "安装服务",
+    "image_url": "图片链接",
+    "specs_text": "规格参数",
+    "service_text": "服务说明",
+    "evidence_text": "证据文本",
+}
 
 
 def _cell_text(cell) -> str:
@@ -47,12 +64,79 @@ def _find_requirements_table(document: Document):
     raise ValueError("未找到包含技术参数表头的表格。")
 
 
-def _format_product_value(value: Any) -> str:
+def _format_product_value(value: Any, empty_text: str = "") -> str:
     if value is None:
-        return ""
+        return empty_text
     if isinstance(value, list):
-        return "；".join(str(item) for item in value)
-    return str(value)
+        text = "；".join(str(item) for item in value if str(item).strip())
+        return text or empty_text
+    text = str(value).strip()
+    return text if text else empty_text
+
+
+def _first_product_value(product: dict[str, Any], *fields: str, empty_text: str = "") -> str:
+    for field in fields:
+        text = _format_product_value(product.get(field), "")
+        if text:
+            return text
+    return empty_text
+
+
+def _format_missing_fields(product: dict[str, Any]) -> str:
+    missing_fields = list(product.get("missing_fields") or [])
+    computed_fields = {
+        "price": product.get("price"),
+        "dimensions": product.get("dimensions"),
+        "material": product.get("material"),
+        "installation_service": _first_product_value(product, "installation_service", "service_text"),
+        "url": product.get("url"),
+        "image_url": product.get("image_url"),
+        "evidence_text": _first_product_value(product, "evidence_text", "evidence"),
+    }
+    for field, value in computed_fields.items():
+        if not _format_product_value(value, "") and field not in missing_fields:
+            missing_fields.append(field)
+
+    labels = [MISSING_FIELD_LABELS.get(field, field) for field in dict.fromkeys(missing_fields) if field]
+    if not labels:
+        return "无"
+    return "；".join(f"{label}待人工复核" for label in labels)
+
+
+def _format_match_notes(product: dict[str, Any]) -> str:
+    reasons = _format_product_value(product.get("reasons"), "")
+    reason = _format_product_value(product.get("reason"), "")
+    score = _format_product_value(product.get("score"), "")
+    parts = []
+    if score:
+        parts.append(f"匹配分数：{score}")
+    if reasons:
+        parts.append(reasons)
+    elif reason:
+        parts.append(reason)
+    return "；".join(parts) if parts else "仅作为低置信度候选，需人工复核。"
+
+
+def _format_risk_notes(product: dict[str, Any]) -> str:
+    risks = _format_product_value(product.get("risk_tips"), "") or _format_product_value(product.get("risks"), "")
+    if product.get("manual_review_required"):
+        risks = f"{risks}；存在待人工复核字段。" if risks else "存在待人工复核字段。"
+    return risks or "采购前需人工确认价格、规格、来源和服务。"
+
+
+def _format_recommendation_explanation(product: dict[str, Any]) -> str:
+    explanation = product.get("recommendation_explanation")
+    if not isinstance(explanation, dict):
+        return _format_match_notes(product)
+    parts = [
+        explanation.get("why_recommended"),
+        "命中指标：" + _format_metadata_value(explanation.get("matched_requirements")),
+        "排名说明：" + _format_metadata_value(explanation.get("lower_rank_reason")),
+    ]
+    exclusion = _format_metadata_value(explanation.get("exclusion_reason"))
+    if exclusion != "无":
+        parts.append("排除提示：" + exclusion)
+    return "；".join(_format_product_value(part) for part in parts if _format_product_value(part))
 
 
 def _format_metadata_value(value: Any) -> str:
@@ -140,6 +224,7 @@ def _append_recommendation_summary_section(document: Document, metadata: dict[st
             ("Word输出文件路径", output_paths.get("recommendation_result_docx")),
             ("排序结果文件路径", output_paths.get("ranked_products_json")),
             ("响应结果文件路径", output_paths.get("responses_json")),
+            ("评分表 CSV 路径", output_paths.get("sourcing_score_table_csv")),
         ],
     )
 
@@ -181,6 +266,44 @@ def _append_field_risk_section(document: Document) -> None:
         _add_paragraph(document, item, style="List Bullet")
 
 
+def _append_marketplace_search_section(document: Document, metadata: dict[str, Any]) -> None:
+    search = metadata.get("marketplace_search", {})
+    if not isinstance(search, dict) or not search:
+        return
+
+    document.add_heading("淘宝/京东寻源辅助", level=1)
+    document.add_paragraph(
+        search.get(
+            "notice",
+            "当前版本提供淘宝/京东寻源辅助入口。候选商品需通过人工确认或候选商品文件导入后进入自动筛选排序和 Word 输出流程。"
+            "淘宝/京东全自动搜索、商品详情抓取和图片证据处理属于后续 V2。",
+        )
+    )
+    _append_key_value_table(
+        document,
+        [
+            ("精准搜索词", search.get("precise_terms", [])),
+            ("放宽搜索词", search.get("relaxed_terms", [])),
+            ("替代搜索词", search.get("alternative_terms", [])),
+            ("建议排除词", search.get("excluded_terms", [])),
+            ("淘宝搜索关键词", search.get("taobao_keyword", "办公屏风 工位")),
+            ("京东搜索关键词", search.get("jd_keyword", "办公屏风 工位")),
+            ("淘宝搜索链接", search.get("taobao_search_url", "待人工复核")),
+            ("京东搜索链接", search.get("jd_search_url", "待人工复核")),
+        ],
+    )
+
+    suggestions = metadata.get("platform_filter_suggestions") or search.get("filter_suggestions") or []
+    if suggestions:
+        document.add_paragraph("平台筛选建议（采购辅助）：")
+        for item in suggestions:
+            if isinstance(item, dict):
+                text = f"{item.get('category', '建议')}：{item.get('suggestion', '')}"
+            else:
+                text = _format_metadata_value(item)
+            _add_paragraph(document, text, style="List Bullet")
+
+
 def _append_output_index_section(document: Document, metadata: dict[str, Any]) -> None:
     files = metadata.get("output_file_index") or DELIVERY_OUTPUT_FILE_INDEX
     document.add_heading("输出文件索引", level=1)
@@ -195,6 +318,7 @@ def _append_delivery_report(document: Document, delivery_metadata: dict[str, Any
     _append_recommendation_summary_section(document, delivery_metadata)
     _append_review_status_section(document, delivery_metadata)
     _append_field_risk_section(document)
+    _append_marketplace_search_section(document, delivery_metadata)
     _append_output_index_section(document, delivery_metadata)
 
 
@@ -202,7 +326,23 @@ def _append_summary_table(document: Document, summary_products: list[dict[str, A
     document.add_paragraph()
     document.add_paragraph("候选商品 Top 3（本地规则排序候选商品，非最终采购结论）")
 
-    headers = ["排名", "商品名称", "平台", "价格", "链接", "匹配分数", "匹配理由", "风险提示"]
+    headers = [
+        "排名",
+        "商品名称",
+        "平台",
+        "价格",
+        "尺寸",
+        "材质",
+        "安装服务",
+        "商品链接",
+        "图片链接",
+        "匹配说明",
+        "待复核字段",
+        "风险提示",
+        "推荐等级",
+        "推荐解释",
+        "人工确认问题",
+    ]
     table = document.add_table(rows=1, cols=len(headers))
     table.style = "Table Grid"
 
@@ -212,13 +352,20 @@ def _append_summary_table(document: Document, summary_products: list[dict[str, A
     for rank, product in enumerate(summary_products, start=1):
         row = table.add_row().cells
         row[0].text = str(rank)
-        row[1].text = _format_product_value(product.get("title"))
-        row[2].text = _format_product_value(product.get("platform"))
-        row[3].text = _format_product_value(product.get("price"))
-        row[4].text = _format_product_value(product.get("url"))
-        row[5].text = _format_product_value(product.get("score"))
-        row[6].text = _format_product_value(product.get("reasons"))
-        row[7].text = _format_product_value(product.get("risks"))
+        row[1].text = _format_product_value(product.get("title"), "待人工复核")
+        row[2].text = _first_product_value(product, "platform", "source", empty_text="待人工复核")
+        row[3].text = _format_product_value(product.get("price"), "待人工复核")
+        row[4].text = _format_product_value(product.get("dimensions"), "待人工复核")
+        row[5].text = _format_product_value(product.get("material"), "待人工复核")
+        row[6].text = _first_product_value(product, "installation_service", "service_text", empty_text="待人工复核")
+        row[7].text = _format_product_value(product.get("url"), "待人工复核")
+        row[8].text = _format_product_value(product.get("image_url"), "待人工复核")
+        row[9].text = _format_match_notes(product)
+        row[10].text = _format_missing_fields(product)
+        row[11].text = _format_risk_notes(product)
+        row[12].text = _format_product_value(product.get("recommendation_level"), "待人工复核")
+        row[13].text = _format_recommendation_explanation(product)
+        row[14].text = _format_product_value(product.get("manual_confirmation_questions"), "待人工复核")
 
 
 def write_responses(
